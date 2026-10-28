@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SmartHydration - Halaman Siswa</title>
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #0d9488 0%, #059669 100%);
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+  }
+  .container {
+    background: white;
+    border-radius: 20px;
+    padding: 28px 24px;
+    max-width: 420px;
+    width: 100%;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  .header { text-align: center; margin-bottom: 20px; }
+  .header h1 { color: #0d9488; font-size: 24px; margin-bottom: 4px; }
+  .header p { color: #64748b; font-size: 13px; }
+  #reader { border-radius: 12px; overflow: hidden; margin-bottom: 16px; background: #f1f5f9; min-height: 0; }
+  .btn {
+    width: 100%; padding: 14px; border: none; border-radius: 10px;
+    font-size: 15px; font-weight: 600; cursor: pointer; transition: all 0.2s;
+  }
+  .btn-primary { background: #0d9488; color: white; }
+  .btn-primary:hover { background: #0f766e; }
+  .btn-secondary { background: #f1f5f9; color: #334155; margin-top: 8px; }
+  .btn-secondary:hover { background: #e2e8f0; }
+  .santri-info {
+    background: #f0fdfa; padding: 12px 16px; border-radius: 10px;
+    margin-bottom: 16px; border-left: 4px solid #0d9488;
+  }
+  .santri-info strong { color: #0d9488; }
+  .volume-options {
+    display: grid; grid-template-columns: repeat(2, 1fr);
+    gap: 10px; margin-bottom: 16px;
+  }
+  .volume-btn {
+    padding: 20px 12px; border: 2px solid #e2e8f0; border-radius: 12px;
+    background: white; font-size: 18px; font-weight: 700; color: #334155;
+    cursor: pointer; transition: all 0.2s;
+  }
+  .volume-btn:hover { border-color: #0d9488; background: #f0fdfa; color: #0d9488; }
+  .volume-btn small { display: block; font-size: 11px; font-weight: 400; color: #94a3b8; margin-top: 2px; }
+  .result { text-align: center; padding: 24px; background: #f0fdfa; border-radius: 12px; margin-top: 16px; }
+  .result .big { font-size: 40px; font-weight: 700; color: #0d9488; line-height: 1; }
+  .result .label { color: #64748b; font-size: 13px; margin-top: 4px; }
+  .progress-bar { height: 12px; background: #e2e8f0; border-radius: 6px; overflow: hidden; margin-top: 16px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #0d9488, #059669); transition: width 0.5s ease; }
+  .status-text { margin-top: 14px; font-weight: 600; font-size: 15px; }
+  .hidden { display: none !important; }
+  .loading { text-align: center; padding: 20px; color: #64748b; }
+  .spinner {
+    border: 3px solid #e2e8f0; border-top: 3px solid #0d9488;
+    border-radius: 50%; width: 36px; height: 36px;
+    animation: spin 1s linear infinite; margin: 0 auto 10px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .manual-input { margin-top: 16px; padding-top: 16px; border-top: 1px dashed #cbd5e1; }
+  .manual-input label { display: block; font-size: 12px; color: #64748b; margin-bottom: 6px; }
+  .manual-input input {
+    width: 100%; padding: 10px; border: 2px solid #e2e8f0;
+    border-radius: 8px; font-size: 14px; margin-bottom: 8px;
+  }
+  .manual-input input:focus { outline: none; border-color: #0d9488; }
+  .warning {
+    background: #fef3c7; border: 1px solid #f59e0b;
+    padding: 12px; border-radius: 8px; margin-bottom: 16px;
+    font-size: 12px; color: #92400e;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <h1>💧 SmartHydration</h1>
+    <p>Scan QR Code pada tumbler Anda</p>
+  </div>
+
+  <div id="config-warning" class="warning hidden">
+    ⚠️ <strong>API_URL belum diset!</strong><br>
+    Edit file siswa.html, ganti <code>API_URL</code> dengan URL Web App Google Apps Script Anda.
+  </div>
+
+  <!-- STEP 1: SCAN -->
+  <div id="step-scan">
+    <div id="reader"></div>
+    <button class="btn btn-primary" id="btn-start-scan" onclick="startScan()">
+      📷 Mulai Scan QR
+    </button>
+    <div class="manual-input">
+      <label>Atau input kode manual:</label>
+      <input
+        type="text"
+        id="manual-qr"
+        placeholder="Contoh: SH-TB-001"
+      >
+      <button class="btn btn-secondary" onclick="cekManual()">
+        Cek Kode
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 2: VOLUME -->
+  <div id="step-volume" class="hidden">
+    <div class="santri-info">
+      Halo, <strong id="nama-santri">-</strong>!<br>
+      <small style="color:#64748b" id="info-santri"></small>
+    </div>
+    <p style="text-align:center; margin-bottom:14px; font-weight:600; color:#334155;">
+      Berapa mL yang diminum?
+    </p>
+    <div class="volume-options">
+      <button class="volume-btn" onclick="pilihVolume(150)">150 <small>mL</small></button>
+      <button class="volume-btn" onclick="pilihVolume(200)">200 <small>mL</small></button>
+      <button class="volume-btn" onclick="pilihVolume(250)">250 <small>mL</small></button>
+      <button class="volume-btn" onclick="pilihVolume(300)">300 <small>mL</small></button>
+    </div>
+    <button class="btn btn-secondary" onclick="resetSemua()">← Scan Ulang</button>
+  </div>
+
+  <!-- STEP 3: HASIL -->
+  <div id="step-result" class="hidden">
+    <div class="result">
+      <div style="font-size:32px; margin-bottom:8px;">✅</div>
+      <div class="big" id="total-minum">0 mL</div>
+      <div class="label">Total hari ini</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+      </div>
+      <div class="status-text" id="status-text"></div>
+    </div>
+    <button class="btn btn-primary" style="margin-top:16px;" onclick="resetSemua()">
+      🔄 Scan Lagi
+    </button>
+  </div>
+
+  <!-- STEP 4: LOADING -->
+  <div id="step-loading" class="hidden">
+    <div class="loading">
+      <div class="spinner"></div>
+      <p>Memproses...</p>
+    </div>
+  </div>
+
+  <!-- STEP 5: ERROR -->
+  <div id="step-error" class="hidden">
+    <div style="text-align:center; padding:20px;">
+      <div style="font-size:48px; margin-bottom:12px;">⚠️</div>
+      <p id="error-message" style="color:#ef4444; margin-bottom:16px;"></p>
+      <button class="btn btn-primary" onclick="resetSemua()">Coba Lagi</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// ⚠️ GANTI BARIS DI BAWAH INI DENGAN URL WEB APP ANDA
+// ============================================================
+const API_URL = 'https://script.google.com/macros/s/AKfycbyRWsYyXld42091APfDRe879PxbMn80vJ00kP2C3Qk75x2a6PdbV4ynRBr_WtR0Lb6_XA/exec';
+// Contoh yang benar (URL panjang):
+// const API_URL = 'https://script.google.com/macros/s/AKfycbx1234567890abcdef/exec';
+
+// Cek apakah API_URL masih placeholder
+if (API_URL.includes('...')) {
+  document.getElementById('config-warning').classList.remove('hidden');
+}
+
+let html5QrCode = null;
+let currentSantri = null;
+
+// ============ HELPER ============
+function showStep(stepId) {
+  var steps = ['step-scan', 'step-volume', 'step-result', 'step-loading', 'step-error'];
+  for (var i = 0; i < steps.length; i++) {
+    var el = document.getElementById(steps[i]);
+    if (el) el.classList.add('hidden');
+  }
+  var target = document.getElementById(stepId);
+  if (target) target.classList.remove('hidden');
+}
+
+function showError(msg) {
+  var el = document.getElementById('error-message');
+  if (el) el.textContent = msg;
+  showStep('step-error');
+}
+
+// ============ SCAN ============
+function startScan() {
+  if (typeof Html5Qrcode === 'undefined') {
+    showError('Library QR Scanner belum dimuat. Cek koneksi internet Anda.');
+    return;
+  }
+  
+  if (!html5QrCode) {
+    html5QrCode = new Html5Qrcode("reader");
+  }
+  
+  html5QrCode.start(
+    { facingMode: "environment" },
+    { fps: 10, qrbox: { width: 250, height: 250 } },
+    onScanSuccess,
+    function(err) { /* ignore frame errors */ }
+  ).catch(function(err) {
+    showError(
+      'Tidak bisa akses kamera.\n\n' +
+      'Kemungkinan penyebab:\n' +
+      '1. File dibuka via file:// (harus HTTPS atau localhost)\n' +
+      '2. Kamera tidak diizinkan browser\n' +
+      '3. Tidak ada kamera\n\n' +
+      'Gunakan input manual di bawah untuk testing.\n\n' +
+      'Error: ' + err
+    );
+  });
+}
+
+function onScanSuccess(decodedText) {
+  if (html5QrCode) {
+    try { html5QrCode.stop(); } catch(e) {}
+  }
+  
+  var qrCode = decodedText.trim();
+  if (qrCode.indexOf('/') !== -1) {
+    var parts = qrCode.split('/').filter(function(p) { return p; });
+    qrCode = parts[parts.length - 1];
+  }
+  
+  cekQRCode(qrCode);
+}
+
+function cekManual() {
+  var input = document.getElementById('manual-qr');
+  if (!input) return;
+  var kode = input.value.trim().toUpperCase();
+  if (!kode) {
+    alert('Masukkan kode QR dulu');
+    return;
+  }
+  cekQRCode(kode);
+}
+
+function cekQRCode(qrCode) {
+  if (API_URL.includes('...')) {
+    showError('API_URL belum diset. Edit file siswa.html dan ganti API_URL dengan URL Web App Anda.');
+    return;
+  }
+  
+  showStep('step-loading');
+  
+  var url = API_URL + '?action=getSantri&qr_code=' + encodeURIComponent(qrCode);
+  
+  fetch(url)
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (!data.success) {
+        showError(data.error || 'QR Code tidak terdaftar: ' + qrCode);
+        return;
+      }
+      currentSantri = data.santri;
+      document.getElementById('nama-santri').textContent = currentSantri.nama;
+      document.getElementById('info-santri').textContent =
+        currentSantri.kelas + ' • Target: ' + currentSantri.target_ml +
+        ' mL • Sudah: ' + currentSantri.total_hari_ini + ' mL';
+      showStep('step-volume');
+    })
+    .catch(function(err) {
+      showError('Gagal cek QR: ' + err.message + '\n\nCek API_URL dan koneksi internet.');
+    });
+}
+
+// ============ SIMPAN VOLUME ============
+function pilihVolume(volume) {
+  if (!currentSantri) {
+    showError('Data santri hilang, silakan scan ulang');
+    return;
+  }
+  
+  showStep('step-loading');
+  
+  fetch(API_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: JSON.stringify({
+      action: 'simpanMinum',
+      qr_code: currentSantri.qr_code,
+      volume_ml: volume
+    })
+  })
+    .then(function(res) { return res.json(); })
+    .then(function(data) {
+      if (!data.success) {
+        showError(data.error || 'Gagal menyimpan');
+        return;
+      }
+      var d = data.data;
+      document.getElementById('total-minum').textContent = d.total_hari_ini + ' mL';
+      document.getElementById('progress-fill').style.width = Math.min(d.persen, 100) + '%';
+      
+      var statusText = '';
+      if (d.persen >= 100) {
+        statusText = '🎉 Target tercapai! Hebat!';
+      } else if (d.persen >= 75) {
+        statusText = '👍 Sedikit lagi, ayo minum lagi!';
+      } else if (d.persen >= 50) {
+        statusText = '💪 Setengah jalan, semangat!';
+      } else {
+        statusText = '💧 Ayo minum lebih banyak lagi!';
+      }
+      statusText += ' (' + d.persen + '% dari ' + d.target_ml + ' mL)';
+      
+      document.getElementById('status-text').textContent = statusText;
+      showStep('step-result');
+    })
+    .catch(function(err) {
+      showError('Gagal simpan: ' + err.message);
+    });
+}
+
+// ============ RESET ============
+function resetSemua() {
+  if (html5QrCode) {
+    try { html5QrCode.stop(); } catch(e) {}
+  }
+  currentSantri = null;
+  var input = document.getElementById('manual-qr');
+  if (input) input.value = '';
+  var reader = document.getElementById('reader');
+  if (reader) reader.innerHTML = '';
+  showStep('step-scan');
+}
+
+// ============ CEK SAAT LOAD ============
+window.addEventListener('load', function() {
+  var params = new URLSearchParams(window.location.search);
+  var qrParam = params.get('qr') || params.get('qr_code');
+  if (qrParam) { document.getElementById('manual-qr').value = qrParam; cekQRCode(qrParam); }
+  console.log('SmartHydration loaded');
+  console.log('API_URL:', API_URL);
+  console.log('typeof cekManual:', typeof cekManual);
+  console.log('typeof Html5Qrcode:', typeof Html5Qrcode);
+});
+</script>
+</body>
+</html>
