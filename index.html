@@ -705,3 +705,297 @@ async function loadStudents() {
     const result = await apiGet("getSantriList");
     students = result.data || [];
     renderStudents();
+    populateHistorySelect();
+    clearNotice("studentNotice");
+  } catch (err) {
+    showNotice("studentNotice", "Gagal mengambil data siswa: " + err.message, "error");
+    $("studentTable").innerHTML =
+      '<tr><td colspan="5">Data siswa tidak dapat dimuat.</td></tr>';
+    console.error(err);
+  }
+}
+
+function renderStudents() {
+  const keyword = ($("searchStudent").value || "").trim().toLowerCase();
+  const filtered = students.filter(s =>
+    [s.id_santri,s.nama,s.kelas,s.qr_code]
+      .some(v => String(v || "").toLowerCase().includes(keyword))
+  );
+
+  $("studentCount").textContent =
+    filtered.length + " siswa ditampilkan";
+
+  $("studentTable").innerHTML = filtered.length ? filtered.map(s => `
+    <tr>
+      <td>${escapeHTML(s.id_santri)}</td>
+      <td>${escapeHTML(s.nama)}</td>
+      <td>${escapeHTML(s.kelas || "-")}</td>
+      <td>${escapeHTML(s.qr_code)}</td>
+      <td>${formatNumber(s.target_ml)} mL</td>
+    </tr>
+  `).join("") : '<tr><td colspan="5">Tidak ada siswa yang cocok.</td></tr>';
+}
+
+$("searchStudent").addEventListener("input", renderStudents);
+
+function populateHistorySelect() {
+  const select = $("historyStudent");
+  const previous = select.value;
+
+  select.innerHTML = '<option value="">Pilih siswa...</option>' +
+    students.map(s => `<option value="${escapeHTML(s.id_santri)}">${escapeHTML(s.nama)} — ${escapeHTML(s.kelas || "-")}</option>`).join("");
+
+  if (students.some(s => s.id_santri === previous)) {
+    select.value = previous;
+  }
+}
+
+/* =====================================================
+   PEMINDAI QR DAN PENCATATAN MINUM
+   ===================================================== */
+async function lookupStudent(qr) {
+  qr = String(qr || "").trim();
+  if (!qr) {
+    showNotice("studentInfo", "Masukkan atau pindai QR Code terlebih dahulu.", "error");
+    return;
+  }
+
+  $("saveDrink").disabled = true;
+  selectedStudent = null;
+  clearNotice("drinkNotice");
+
+  try {
+    const result = await apiGet("getSantri", {qr_code:qr});
+    const s = result.santri;
+
+    if (!s) throw new Error("Data siswa tidak ditemukan.");
+
+    selectedStudent = s;
+    $("qrInput").value = s.qr_code;
+
+    showNotice(
+      "studentInfo",
+      `${s.nama} | Kelas ${s.kelas || "-"} | Total hari ini: ${formatNumber(s.total_hari_ini)} mL dari target ${formatNumber(s.target_ml)} mL (${s.persen}%).`,
+      "success"
+    );
+    $("saveDrink").disabled = false;
+  } catch (err) {
+    showNotice("studentInfo", err.message, "error");
+    console.error(err);
+  }
+}
+
+$("lookupQR").addEventListener("click", () => lookupStudent($("qrInput").value));
+
+$("qrInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    lookupStudent($("qrInput").value);
+  }
+});
+
+async function startScanner() {
+  if (scannerRunning) return;
+
+  if (typeof Html5Qrcode === "undefined") {
+    showNotice("drinkNotice", "Pustaka pemindai QR gagal dimuat. Periksa koneksi internet.", "error");
+    return;
+  }
+
+  try {
+    scanner = new Html5Qrcode("reader");
+    await scanner.start(
+      {facingMode:"environment"},
+      {fps:10,qrbox:{width:230,height:230}},
+      async decodedText => {
+        $("qrInput").value = decodedText;
+        await lookupStudent(decodedText);
+        await stopScanner();
+      },
+      () => {}
+    );
+    scannerRunning = true;
+    $("startScanner").disabled = true;
+  } catch (err) {
+    showNotice(
+      "drinkNotice",
+      "Kamera tidak dapat dibuka. Pastikan menggunakan HTTPS dan izin kamera telah diberikan. " + err,
+      "error"
+    );
+    console.error(err);
+  }
+}
+
+async function stopScanner() {
+  if (!scanner || !scannerRunning) return;
+  try {
+    await scanner.stop();
+    await scanner.clear();
+  } catch (err) {
+    console.warn("Kamera:", err);
+  }
+  scannerRunning = false;
+  $("startScanner").disabled = false;
+}
+
+$("startScanner").addEventListener("click", startScanner);
+$("stopScanner").addEventListener("click", stopScanner);
+
+$("saveDrink").addEventListener("click", async () => {
+  if (!selectedStudent) {
+    showNotice("drinkNotice", "Cari siswa terlebih dahulu.", "error");
+    return;
+  }
+
+  const volume = Number($("volume").value);
+  const qr = selectedStudent.qr_code;
+
+  $("saveDrink").disabled = true;
+  showNotice("drinkNotice", "Menyimpan catatan konsumsi...", "info");
+
+  try {
+    const result = await apiPost({
+      action:"simpanMinum",
+      qr_code:qr,
+      volume_ml:volume
+    });
+
+    const d = result.data || {};
+    showNotice(
+      "drinkNotice",
+      `Berhasil mencatat ${formatNumber(d.volume_dicatat || volume)} mL untuk ${d.santri || selectedStudent.nama}. Total hari ini: ${formatNumber(d.total_hari_ini)} mL dari target ${formatNumber(d.target_ml)} mL (${d.persen}%).`,
+      "success"
+    );
+
+    await lookupStudent(qr);
+    await loadDashboard();
+  } catch (err) {
+    showNotice("drinkNotice", "Gagal menyimpan: " + err.message, "error");
+    console.error(err);
+  } finally {
+    $("saveDrink").disabled = !selectedStudent;
+  }
+});
+
+/* =====================================================
+   RIWAYAT MINUM
+   ===================================================== */
+$("loadHistory").addEventListener("click", loadHistory);
+
+async function loadHistory() {
+  const id = $("historyStudent").value;
+  const days = Number($("historyDays").value);
+
+  if (!id) {
+    showNotice("historyNotice", "Pilih siswa terlebih dahulu.", "error");
+    return;
+  }
+
+  showNotice("historyNotice", "Memuat riwayat konsumsi...", "info");
+
+  try {
+    const [dailyResult, transactionResult] = await Promise.all([
+      apiGet("getRiwayat", {id_santri:id}),
+      apiGet("getTransaksi", {id_santri:id,hari:days})
+    ]);
+
+    const daily = dailyResult.data || [];
+    const transactions = transactionResult.data || [];
+
+    if (chartHistory) chartHistory.destroy();
+    chartHistory = new Chart($("chartHistory"), {
+      type:"bar",
+      data:{
+        labels:daily.map(x => {
+          const p = String(x.tanggal || "").split("-");
+          return p.length === 3 ? p[2] + "/" + p[1] : x.tanggal;
+        }),
+        datasets:[{
+          label:"Konsumsi (mL)",
+          data:daily.map(x => Number(x.total_ml || 0)),
+          borderWidth:1
+        }]
+      },
+      options:{responsive:true,scales:{y:{beginAtZero:true}}}
+    });
+
+    $("historyTable").innerHTML = transactions.length
+      ? transactions.map(t => `
+        <tr>
+          <td>${escapeHTML(t.timestamp || "-")}</td>
+          <td>${escapeHTML(t.nama || "")}</td>
+          <td>${formatNumber(t.volume_ml)} mL</td>
+          <td>${escapeHTML(t.sumber || "-")}</td>
+        </tr>
+      `).join("")
+      : '<tr><td colspan="4">Belum ada transaksi pada rentang waktu tersebut.</td></tr>';
+
+    showNotice(
+      "historyNotice",
+      `Riwayat berhasil dimuat. Total ${transactions.length} transaksi dalam ${days} hari terakhir. Grafik menampilkan data harian 7 hari terakhir dari API.`,
+      "success"
+    );
+  } catch (err) {
+    showNotice("historyNotice", "Gagal memuat riwayat: " + err.message, "error");
+    console.error(err);
+  }
+}
+
+/* =====================================================
+   TAMBAH SISWA
+   ===================================================== */
+$("addStudentForm").addEventListener("submit", async event => {
+  event.preventDefault();
+
+  const payload = {
+    action:"tambahSantri",
+    id_santri:$("newId").value.trim(),
+    nama:$("newName").value.trim(),
+    kelas:$("newClass").value.trim(),
+    qr_code:$("newQR").value.trim().toUpperCase(),
+    target_ml:Number($("newTarget").value),
+    no_hp:$("newPhone").value.trim()
+  };
+
+  if (!payload.id_santri || !payload.nama || !payload.qr_code) {
+    showNotice("addNotice", "ID, nama, dan QR Code wajib diisi.", "error");
+    return;
+  }
+
+  $("addStudentBtn").disabled = true;
+  showNotice("addNotice", "Menyimpan data siswa...", "info");
+
+  try {
+    const result = await apiPost(payload);
+    showNotice(
+      "addNotice",
+      result.message || "Siswa berhasil ditambahkan.",
+      "success"
+    );
+
+    $("addStudentForm").reset();
+    $("newTarget").value = 2000;
+
+    await loadStudents();
+    await loadDashboard();
+  } catch (err) {
+    showNotice("addNotice", "Gagal menambahkan siswa: " + err.message, "error");
+    console.error(err);
+  } finally {
+    $("addStudentBtn").disabled = false;
+  }
+});
+
+/* =====================================================
+   INISIALISASI
+   ===================================================== */
+async function init() {
+  await testConnection();
+  await loadStudents();
+  await loadDashboard();
+}
+
+init();
+</script>
+</body>
+</html>
